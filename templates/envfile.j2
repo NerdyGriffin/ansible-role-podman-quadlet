@@ -1,0 +1,5 @@
+{# Managed by Ansible — podman_quadlet role. Mode 0600. #}
+{# Keys are sorted for deterministic file content (avoids spurious restarts). #}
+{% for key in podman_quadlet_secret_environment.keys() | sort %}
+{{ key }}={{ podman_quadlet_secret_environment[key] }}
+{% endfor %}

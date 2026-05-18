@@ -51,6 +51,84 @@ Available variables are listed below, see `defaults/main.yml` and examples below
 | **podman_quadlet_firewall_port_forwards** <br> list of port forward entries | Forwards host ports to container ports. Useful for rootless containers that cannot bind to privileged ports (< 1024). See [Firewall port forwarding](#firewall-port-forwarding). |
 | **podman_quadlet_pre_pull_images** <br> boolean / default: `true` | Pre-pull container images before the first systemd restart. Parses `Image=` lines from deployed `.container` quadlet files and runs `podman pull` for each unique image. Prevents systemd `TimeoutStartSec` from expiring on first deploy. See [Image pre-pulling](#image-pre-pulling). |
 | **podman_quadlet_pull_policy** <br> string / default: `newer` | `--policy` passed to `podman pull` during pre-pull. `newer` (default) re-downloads layers only when the remote is newer, saving bandwidth on redeploys. Other values: `always`, `missing`, `never`. See [Pull policy and registry-failure handling](#pull-policy-and-registry-failure-handling). |
+| **podman_quadlet_secret_environment** <br> dict / default: `{}` | Vault-encrypted `KEY: value` pairs rendered to a sibling `<app>.env` EnvironmentFile (mode `0600`) — secrets never appear in the unit file itself. Reference from your `.container.j2` template via `EnvironmentFile={{ podman_quadlet_envfile_path }}`. See [Vault-encrypted secrets](#vault-encrypted-secrets). |
+
+### Vault-encrypted secrets
+
+Secrets that the container needs at runtime (API tokens, claim codes, DB
+passwords) should not live in a quadlet unit file — those files are
+world-readable in `/etc/containers/systemd/` and end up in `git diff`s when
+the unit is edited.
+
+`podman_quadlet_secret_environment` accepts a dict of `KEY: value` pairs
+and renders them to a systemd `EnvironmentFile` sitting alongside the
+quadlet units:
+
+| Mode | Path | Owner | Mode |
+| --- | --- | --- | --- |
+| rootful | `/etc/containers/systemd/<app>/<app>.env` | `root:root` | `0600` |
+| rootless | `<home>/.config/containers/systemd/<app>/<app>.env` | `<user>:<user>` | `0600` |
+
+The absolute path is also exposed as the fact
+`podman_quadlet_envfile_path` so your `.container.j2` template doesn't
+need to repeat the layout convention.
+
+**Example: Plex claim token from ansible-vault**
+
+```yaml
+# group_vars/all/vault.yml (encrypted with ansible-vault)
+vault_plex_claim: "claim-xxxxxxxxxxxxxxxxxxxx"
+```
+
+```yaml
+# playbook
+- name: Deploy plex
+  ansible.builtin.import_role:
+    name: podman_quadlet
+  vars:
+    podman_quadlet_app_name: plex
+    podman_quadlet_files_templates_src_path: "{{ playbook_dir }}"
+    podman_quadlet_file_names:
+      - plex.container.j2
+    podman_quadlet_secret_environment:
+      PLEX_CLAIM: "{{ vault_plex_claim }}"
+```
+
+```jinja
+{# templates/quadlets/plex.container.j2 #}
+[Unit]
+Description=Plex Media Server
+
+[Container]
+Image=lscr.io/linuxserver/plex:latest
+EnvironmentFile={{ podman_quadlet_envfile_path }}
+Environment=TZ=America/New_York
+PublishPort=32400:32400
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
+```
+
+The rendered `plex.env` contains:
+
+```
+PLEX_CLAIM=claim-xxxxxxxxxxxxxxxxxxxx
+```
+
+Notes:
+
+- Keys are sorted on render so the file content is deterministic across
+  runs (no spurious restarts).
+- Templating runs with `no_log: true` so vault values do not appear in
+  Ansible's task output.
+- An empty (or unset) `podman_quadlet_secret_environment` causes the env
+  file to be ensured **absent** on the host, so removing a secret from
+  inventory cleans up the file on the next run.
+- Keys must match systemd's `EnvironmentFile` variable-name grammar
+  (`[A-Za-z_][A-Za-z0-9_]*`); the role asserts this.
 
 ### Config patching
 

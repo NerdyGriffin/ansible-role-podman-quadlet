@@ -1,5 +1,8 @@
 ---
 
+- name: Render rootless EnvironmentFile for vault-encrypted secret_environment
+  ansible.builtin.import_tasks: rootless-secret-env.yml
+
 - name: Copy/Render quadlet unit files/templates
   ansible.builtin.import_tasks: rootless-quadlets.yml
 

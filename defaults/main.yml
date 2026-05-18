@@ -134,6 +134,41 @@ podman_quadlet_rootless_user_name: ''
 ###############################################################################
 
 ###############################################################################
+podman_quadlet_secret_environment: {}
+###############################################################################
+# optional: a dict of secret KEY=VALUE pairs rendered into a 0600 EnvironmentFile
+# alongside the quadlet unit files. Values are expected to come from ansible-vault
+# at the caller's site; no secrets ever land in the quadlet unit file itself.
+#
+# The file is written to:
+#   <systemd_dir>/<app_name>/<app_name>.env   (mode 0600, owner root for rootful,
+#                                              owner <rootless_user> for rootless)
+# and the absolute path is exposed as the fact `podman_quadlet_envfile_path` so
+# templates can reference it without duplicating the layout convention.
+#
+# To wire it into a container, reference it from your .container.j2 template:
+#
+#   [Container]
+#   Image=ghcr.io/foo/bar:latest
+#   EnvironmentFile={{ podman_quadlet_envfile_path }}
+#
+# Or hard-code the path in a plain .container file when you don't need a
+# template (the path is deterministic from app_name).
+#
+# When the dict is empty (the default), the env file is ensured absent — removing
+# a secret from your config cleans up the on-disk file on the next run.
+#
+# Example (in your playbook, with vault-encrypted values):
+#   podman_quadlet_secret_environment:
+#     API_TOKEN: "{{ vault_api_token }}"
+#     DB_PASSWORD: "{{ vault_db_password }}"
+#
+# Keys are sorted on render so file contents are deterministic across runs.
+# Values are passed through as-is (be careful with embedded newlines or quotes;
+# the file uses systemd EnvironmentFile syntax: KEY=VALUE per line).
+###############################################################################
+
+###############################################################################
 podman_quadlet_min_podman_major: 5
 ###############################################################################
 # optional: minimum major version of podman required on the target host.
@@ -217,6 +252,11 @@ podman_quadlet_src_container_file_name_full_path: ''
 # Full path name of the systemd folder on remote system
 # set in tasks/
 podman_quadlet_systemd_dir: ''
+
+# Full path of the rendered EnvironmentFile for secret_environment.
+# Set by tasks/<rootful|rootless>-secret-env.yml; reference it from your
+# .container.j2 template as: EnvironmentFile={{ podman_quadlet_envfile_path }}
+podman_quadlet_envfile_path: ''
 
 # Firewall status set in asserts/assert-firewall.yml
 podman_quadlet_firewall_status: ''
