@@ -37,6 +37,7 @@
   loop: "{{ podman_quadlet_file_names }}"
   when: not item.endswith('.j2')
   delegate_to: localhost
+  become: false
   check_mode: true
 
 - name: Check quadlet templates in templates/quadlets/
@@ -46,6 +47,7 @@
   loop: "{{ podman_quadlet_file_names }}"
   when: item.endswith('.j2')
   delegate_to: localhost
+  become: false
   check_mode: true
 
 - name: Build resolved quadlet files list

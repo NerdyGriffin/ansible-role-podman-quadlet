@@ -10,11 +10,15 @@
       (RHEL, CentOS, Rocky, Alma, Fedora).
       Detected os_family={{ ansible_facts.os_family }}.
 
-# Check if Podman ≥ 5.0 is installed
+# Check if Podman ≥ 5.0 is installed.
+# check_mode: false ensures the version probe runs under `--check` too —
+# without it, `podman_version_cmd.stdout` is empty in check mode and the
+# downstream regex/first filter raises "sequence was empty".
 - name: Get podman version
   ansible.builtin.command: podman --version
   register: podman_version_cmd
   changed_when: false
+  check_mode: false
   failed_when: podman_version_cmd.rc != 0
 
 - name: Extract podman major version
@@ -27,10 +31,15 @@
         | int
       }}
 
-- name: Assert podman version is >= 5
+- name: Assert podman version meets minimum
   ansible.builtin.assert:
     that:
-      - podman_major_version >= 5
+      - podman_major_version | int >= podman_quadlet_min_podman_major | int
     fail_msg: >
-      podman-quadlet requires Podman version 5 or newer.
-      Detected: {{ podman_version_cmd.stdout }}
+      podman-quadlet requires Podman major version
+      >= {{ podman_quadlet_min_podman_major }}.
+      Detected: {{ podman_version_cmd.stdout }}.
+      Quadlet support has been in podman since 4.4; if your use case
+      fits podman 4.x (basic .container/.volume units, no podman-5-only
+      features like newer Network= modes), set
+      podman_quadlet_min_podman_major: 4 in your playbook.

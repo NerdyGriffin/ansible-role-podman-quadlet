@@ -22,6 +22,7 @@
   register: caller_role_path_stat
   check_mode: true
   delegate_to: localhost
+  become: false  # read-only stat on the controller, no privilege escalation needed
 
 - name: "Assert that the caller role path exists"
   ansible.builtin.assert:
@@ -29,3 +30,4 @@
       - caller_role_path_stat.stat.exists
     fail_msg: "The caller role path '{{ podman_quadlet_files_templates_src_path }}' does not exist or is not accessible."
   delegate_to: localhost
+  become: false
