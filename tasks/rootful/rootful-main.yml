@@ -6,27 +6,72 @@
 - name: Copy/Render quadlet unit files/templates
   ansible.builtin.import_tasks: rootful-quadlets.yml
 
+# Aggregate "did anything change?" from the unit-file and envfile render tasks
+# above. This drives the conditional restart at the end so repeat invocations
+# of the role are idempotent — no spurious container churn on every play run.
+- name: Aggregate quadlet/envfile change status
+  ansible.builtin.set_fact:
+    podman_quadlet_unit_changed: >-
+      {{
+        (podman_quadlet_envfile_render_result.changed | default(false))
+        or (podman_quadlet_envfile_remove_result.changed | default(false))
+        or (
+          (podman_quadlet_template_render_results.results | default([]))
+          | selectattr('changed', 'defined')
+          | selectattr('changed')
+          | list | length > 0
+        )
+        or (
+          (podman_quadlet_plain_copy_results.results | default([]))
+          | selectattr('changed', 'defined')
+          | selectattr('changed')
+          | list | length > 0
+        )
+      }}
+    podman_quadlet_has_staging: >-
+      {{
+        (podman_quadlet_volumes_files_to_stage | default([]) | length > 0)
+        or (podman_quadlet_volumes_config_patches | default([]) | length > 0)
+      }}
+
 - name: Pre-pull container images
   ansible.builtin.import_tasks: rootful-pre-pull-images.yml
   when: podman_quadlet_pre_pull_images | bool
 
-- name: Initial start of the rootful container to create the volumes
+# Volume-staging dance: the role can pre-populate Podman-named volumes by
+# starting the container once (so Podman creates the volume mountpoints),
+# stopping it, copying files into the mountpoints, then restarting. The
+# whole dance is unnecessary — and disruptively restarts a healthy container
+# — when there is nothing to stage, so the entire block is gated on the
+# presence of staging configuration.
+- name: Stage files into Podman-named volumes
+  when: podman_quadlet_has_staging | bool
+  block:
+    - name: Initial start of the rootful container to create the volumes
+      ansible.builtin.import_tasks: rootful-systemd-start.yml
+
+    - name: Stop the rootful container, to be able to deploy files to the volumes
+      ansible.builtin.import_tasks: rootful-systemd-stop.yml
+
+    - name: Deploy files into all Podman quadlet volumes
+      ansible.builtin.include_tasks: rootful-deploy-volume-files.yml
+      loop: "{{ podman_quadlet_volumes_files_to_stage | default([]) }}"
+      loop_control:
+        loop_var: volume
+
+    - name: Patch config files in all Podman quadlet volumes
+      ansible.builtin.include_tasks: rootful-patch-volume-configs.yml
+      loop: "{{ podman_quadlet_volumes_config_patches | default([]) }}"
+      loop_control:
+        loop_var: volume
+
+# Restart if the unit file (or envfile, or staged volume files) actually
+# changed. Falls back to a plain "ensure started" so a never-yet-started
+# unit (first run on a fresh host) still comes up.
+- name: Restart rootful container (unit changed or volume staging happened)
   ansible.builtin.import_tasks: rootful-systemd-restart.yml
+  when: podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool
 
-- name: Stop the rootful container, to be able to deploy files to the volumes
-  ansible.builtin.import_tasks: rootful-systemd-stop.yml
-
-- name: Deploy files into all Podman quadlet volumes
-  ansible.builtin.include_tasks: rootful-deploy-volume-files.yml
-  loop: "{{ podman_quadlet_volumes_files_to_stage | default([]) }}"
-  loop_control:
-    loop_var: volume
-
-- name: Patch config files in all Podman quadlet volumes
-  ansible.builtin.include_tasks: rootful-patch-volume-configs.yml
-  loop: "{{ podman_quadlet_volumes_config_patches | default([]) }}"
-  loop_control:
-    loop_var: volume
-
-- name: Restart of the rootful container
-  ansible.builtin.import_tasks: rootful-systemd-restart.yml
+- name: Ensure rootful container is running (idempotent fallback)
+  ansible.builtin.import_tasks: rootful-systemd-start.yml
+  when: not (podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool)

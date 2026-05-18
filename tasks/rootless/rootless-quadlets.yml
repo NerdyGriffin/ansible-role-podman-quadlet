@@ -28,6 +28,7 @@
       loop_control:
         label: "{{ item.name }}"
       when: item.is_template
+      register: podman_quadlet_template_render_results
 
     - name: Copy plain quadlet files
       ansible.builtin.copy:
@@ -40,6 +41,7 @@
       loop_control:
         label: "{{ item.name }}"
       when: not item.is_template
+      register: podman_quadlet_plain_copy_results
 
 - name: Validate quadlet unit files
   become: true
