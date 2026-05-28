@@ -5,3 +5,5 @@ podman_quadlet_unit_types:
   - container
   - pod
   - volume
+  - network
+  - timer

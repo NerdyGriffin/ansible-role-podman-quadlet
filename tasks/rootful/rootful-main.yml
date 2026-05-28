@@ -65,13 +65,40 @@
       loop_control:
         loop_var: volume
 
+# A .timer unit, when present, is the activation mechanism for this app — the
+# accompanying (typically Type=oneshot) service is fired on schedule by the
+# timer rather than kept running. This changes the idempotent-fallback below.
+- name: Determine whether a timer unit accompanies this app
+  ansible.builtin.set_fact:
+    podman_quadlet_has_timer: >-
+      {{
+        (podman_quadlet_resolved_files | default([]))
+        | selectattr('name', 'match', '.*\.timer(\.j2)?$')
+        | list | length > 0
+      }}
+
 # Restart if the unit file (or envfile, or staged volume files) actually
-# changed. Falls back to a plain "ensure started" so a never-yet-started
-# unit (first run on a fresh host) still comes up.
+# changed. For a Type=oneshot service this runs it once to apply the change
+# immediately rather than waiting for the next timer fire.
 - name: Restart rootful container (unit changed or volume staging happened)
   ansible.builtin.import_tasks: rootful-systemd-restart.yml
   when: podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool
 
+# Idempotent fallback: ensure a long-running service stays up. Skipped when a
+# .timer drives activation — for a Type=oneshot service, `state: started` would
+# re-run the oneshot on every play; the timer fires it on schedule instead.
 - name: Ensure rootful container is running (idempotent fallback)
   ansible.builtin.import_tasks: rootful-systemd-start.yml
-  when: not (podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool)
+  when:
+    - not (podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool)
+    - not (podman_quadlet_has_timer | bool)
+
+# Ensure the timer is active so its schedule is honored. `state: started`
+# (not restarted) so a Persistent= timer's missed-run tracking isn't reset.
+- name: Ensure rootful timer unit is started (when a .timer was deployed)
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: "{{ podman_quadlet_app_name }}.timer"
+    state: started
+  when: podman_quadlet_has_timer | bool
