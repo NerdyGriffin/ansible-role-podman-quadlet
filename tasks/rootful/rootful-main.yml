@@ -6,6 +6,34 @@
 - name: Copy/Render quadlet unit files/templates
   ansible.builtin.import_tasks: rootful-quadlets.yml
 
+# Detect Type=oneshot in the deployed .container files. A Type=oneshot service
+# (commonly Restart=no, RemainAfterExit=no) is meant to be fired on a schedule
+# by a companion .timer (deployed by the consumer as a native systemd unit) —
+# `systemctl start` on it would re-run the oneshot on every play, which is
+# wasteful and can cascade an unrelated transient failure into a play-failing
+# error. When detected, the idempotent "ensure container is running" fallback
+# below is skipped.
+- name: Detect Type=oneshot in deployed .container files
+  become: true
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['grep', '-lE', '^Type=oneshot']
+        + (podman_quadlet_resolved_files
+           | selectattr('unit_type', 'eq', 'container')
+           | map(attribute='name')
+           | map('regex_replace', '\\.j2$', '')
+           | map('regex_replace', '^', podman_quadlet_systemd_dir ~ '/' ~ podman_quadlet_app_name ~ '/')
+           | list)
+      }}
+  register: podman_quadlet_oneshot_check
+  changed_when: false
+  failed_when: false  # grep rc=1 == no match (= not oneshot); we read .rc below
+  when: >-
+    (podman_quadlet_resolved_files | default([])
+     | selectattr('unit_type', 'eq', 'container')
+     | list | length) > 0
+
 # Aggregate "did anything change?" from the unit-file and envfile render tasks
 # above. This drives the conditional restart at the end so repeat invocations
 # of the role are idempotent — no spurious container churn on every play run.
@@ -33,6 +61,7 @@
         (podman_quadlet_volumes_files_to_stage | default([]) | length > 0)
         or (podman_quadlet_volumes_config_patches | default([]) | length > 0)
       }}
+    podman_quadlet_is_oneshot: "{{ (podman_quadlet_oneshot_check.rc | default(1)) == 0 }}"
 
 - name: Pre-pull container images
   ansible.builtin.import_tasks: rootful-pre-pull-images.yml
@@ -74,4 +103,6 @@
 
 - name: Ensure rootful container is running (idempotent fallback)
   ansible.builtin.import_tasks: rootful-systemd-start.yml
-  when: not (podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool)
+  when:
+    - not (podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool)
+    - not (podman_quadlet_is_oneshot | bool)

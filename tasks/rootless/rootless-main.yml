@@ -6,6 +6,34 @@
 - name: Copy/Render quadlet unit files/templates
   ansible.builtin.import_tasks: rootless-quadlets.yml
 
+# Detect Type=oneshot in the deployed .container files. A Type=oneshot service
+# (commonly Restart=no, RemainAfterExit=no) is meant to be fired on a schedule
+# by a companion .timer (deployed by the consumer as a native systemd unit) —
+# `systemctl start` on it would re-run the oneshot on every play, which is
+# wasteful and can cascade an unrelated transient failure into a play-failing
+# error. When detected, the idempotent "ensure container is running" fallback
+# below is skipped.
+- name: Detect Type=oneshot in deployed .container files
+  become: true
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['grep', '-lE', '^Type=oneshot']
+        + (podman_quadlet_resolved_files
+           | selectattr('unit_type', 'eq', 'container')
+           | map(attribute='name')
+           | map('regex_replace', '\\.j2$', '')
+           | map('regex_replace', '^', podman_quadlet_systemd_dir ~ '/' ~ podman_quadlet_app_name ~ '/')
+           | list)
+      }}
+  register: podman_quadlet_oneshot_check
+  changed_when: false
+  failed_when: false  # grep rc=1 == no match (= not oneshot); we read .rc below
+  when: >-
+    (podman_quadlet_resolved_files | default([])
+     | selectattr('unit_type', 'eq', 'container')
+     | list | length) > 0
+
 # Aggregate "did anything change?" from the unit-file and envfile render
 # tasks above so we only force a restart when something actually changed.
 - name: Aggregate quadlet/envfile change status
@@ -32,6 +60,7 @@
         (podman_quadlet_volumes_files_to_stage | default([]) | length > 0)
         or (podman_quadlet_volumes_config_patches | default([]) | length > 0)
       }}
+    podman_quadlet_is_oneshot: "{{ (podman_quadlet_oneshot_check.rc | default(1)) == 0 }}"
 
 # Pre-pull images so the first restart doesn't timeout waiting for
 # a large image pull to complete within TimeoutStartSec.
@@ -83,4 +112,6 @@
 
 - name: Ensure rootless container is running (idempotent fallback)
   ansible.builtin.import_tasks: rootless-systemd-start.yml
-  when: not (podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool)
+  when:
+    - not (podman_quadlet_unit_changed | bool or podman_quadlet_has_staging | bool)
+    - not (podman_quadlet_is_oneshot | bool)
