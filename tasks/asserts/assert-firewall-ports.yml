@@ -1,14 +1,34 @@
 ---
 
-- name: Gather service facts
-  ansible.builtin.service_facts:
+# Detect firewalld via a single `systemctl is-active` instead of
+# ansible.builtin.service_facts. service_facts enumerates EVERY systemd
+# unit on the host (30-60s on busy systems with libvirt / kubernetes /
+# many timers), and the role's only consumer of that data is the
+# yes/no question below. `systemctl is-active firewalld.service` answers
+# the same question in ~100ms.
+#
+# Cached across import_role invocations within a play: once
+# podman_quadlet_firewall_status is set (from defaults '' → here), the
+# block is skipped on subsequent calls. With 10+ containers per play
+# that's saving 5-10 minutes of wall-clock time.
+- name: Determine firewalld status (cached across role invocations)
+  when: podman_quadlet_firewall_status is not defined or (podman_quadlet_firewall_status | length) == 0
+  block:
+    - name: Probe firewalld active state  # noqa: command-instead-of-module
+      # ansible.builtin.systemd would issue several `systemctl show` calls
+      # to populate its full output — defeats the whole point of the swap.
+      # A direct `systemctl is-active` is one process, one syscall.
+      ansible.builtin.command:
+        cmd: systemctl is-active firewalld.service
+      register: _firewalld_active
+      changed_when: false
+      failed_when: false
+      check_mode: false  # must run under --check too so dryruns reach the rest
 
-- name: Set firewall status
-  ansible.builtin.set_fact:
-    podman_quadlet_firewall_status: >-
-      {{
-        ansible_facts['services'].get('firewalld.service', {}).get('state', 'absent')
-      }}
+    - name: Set firewall status from probe
+      ansible.builtin.set_fact:
+        podman_quadlet_firewall_status: >-
+          {{ 'running' if (_firewalld_active.stdout | trim) == 'active' else 'inactive' }}
 
 - name: Assert that podman_quadlet_firewall_ports is defined and iterable
   ansible.builtin.assert:
