@@ -31,23 +31,23 @@
     podman_quadlet_resolved_files: []
 
 - name: Check quadlet files in files/quadlets/
+  become: false
   ansible.builtin.stat:
     path: "{{ podman_quadlet_files_templates_src_path }}/files/quadlets/{{ item }}"
   register: quadlet_files_stat
   loop: "{{ podman_quadlet_file_names }}"
   when: not item.endswith('.j2')
   delegate_to: localhost
-  become: false
   check_mode: true
 
 - name: Check quadlet templates in templates/quadlets/
+  become: false
   ansible.builtin.stat:
     path: "{{ podman_quadlet_files_templates_src_path }}/templates/quadlets/{{ item }}"
   register: quadlet_templates_stat
   loop: "{{ podman_quadlet_file_names }}"
   when: item.endswith('.j2')
   delegate_to: localhost
-  become: false
   check_mode: true
 
 - name: Build resolved quadlet files list

@@ -50,6 +50,7 @@
   loop: "{{ podman_quadlet_volumes_files_to_stage | subelements('files', skip_missing=True) }}"
 
 - name: Check volume source files/directories exist on control host
+  become: false
   ansible.builtin.stat:
     path: >-
       {{
@@ -63,7 +64,6 @@
       }}
   register: quadlet_volume_src_stat
   delegate_to: localhost
-  become: false
   loop: "{{ podman_quadlet_volumes_files_to_stage | subelements('files', skip_missing=True) }}"
   loop_control:
     label: "{{ item.0.name }} -> {{ item.1.src }}"

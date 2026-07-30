@@ -17,17 +17,17 @@
       must be different from the current role path '{{ role_path }}'.
 
 - name: "Assert that podman_quadlet_files_templates_src_path is a valid directory"
+  become: false  # read-only stat on the controller, no privilege escalation needed
   ansible.builtin.stat:
     path: "{{ podman_quadlet_files_templates_src_path }}"
   register: caller_role_path_stat
   check_mode: true
   delegate_to: localhost
-  become: false  # read-only stat on the controller, no privilege escalation needed
 
 - name: "Assert that the caller role path exists"
+  become: false
   ansible.builtin.assert:
     that:
       - caller_role_path_stat.stat.exists
     fail_msg: "The caller role path '{{ podman_quadlet_files_templates_src_path }}' does not exist or is not accessible."
   delegate_to: localhost
-  become: false
