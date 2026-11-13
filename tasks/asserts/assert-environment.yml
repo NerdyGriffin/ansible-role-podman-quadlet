@@ -1,14 +1,21 @@
 ---
 
-# Currently only redhat os supported
+# Currently only redhat os supported.
+# A Fedora Atomic derivative (for example Bazzite or Aurora) reports its own
+# name as os_family, because ansible-core has no family mapping for it. Its
+# release file is /etc/redhat-release, so distribution_file_variety is
+# "RedHat" there. Accept either fact.
 - name: Assert remote host is a RedHat-based system
   ansible.builtin.assert:
     that:
-      - ansible_facts.os_family == "RedHat"
+      - >-
+        ansible_facts.os_family == "RedHat"
+        or ansible_facts.distribution_file_variety | default("") == "RedHat"
     fail_msg: >
       podman-quadlet requires a RedHat-based system
-      (RHEL, CentOS, Rocky, Alma, Fedora).
-      Detected os_family={{ ansible_facts.os_family }}.
+      (RHEL, CentOS, Rocky, Alma, Fedora and its derivatives).
+      Detected os_family={{ ansible_facts.os_family }},
+      distribution_file_variety={{ ansible_facts.distribution_file_variety | default("") }}.
 
 # Check if Podman ≥ 5.0 is installed.
 # check_mode: false ensures the version probe runs under `--check` too —
